@@ -9,6 +9,7 @@ import (
     "log"
     "net/rpc"
     "os"
+	"time"
 )
 
 
@@ -63,8 +64,7 @@ func eachCall(mapf func(string, string) []KeyValue,
 ) (bool, bool) {
 	tap := &TaskAssignment{}
 	called := call("Coordinator.RequestTask", &Empty{}, tap)
-	var taskComplete bool
-	var err error
+	
 
 	if !called {
 		return false, true
@@ -76,17 +76,24 @@ func eachCall(mapf func(string, string) []KeyValue,
 	case TaskNone:
 		return false, true
 	case TaskMap:
-		taskComplete, err = mapper(tap.Filename, tap.LowerX, tap.Y, mapf)
+		err := mapper(tap.Filename, tap.LowerX, tap.Y, mapf)
+		if err != nil {
+			log.Println(err)
+		} else {
+			tcp := &TaskCompletion{LowerX: tap.LowerX}
+			call("Coordinator.ResponseTask", tcp, &Empty{})
+		}
 	case TaskReduce:
-		taskComplete, err = reducer(tap.LowerY, tap.X, reducef)
+		err := reducer(tap.LowerY, tap.X, reducef)
+		if err != nil {
+			log.Println(err)
+		} else {
+			tcp := &TaskCompletion{LowerY: tap.LowerY}
+			call("Coordinator.ResponseTask", tcp, &Empty{})
+		}
 	}
 
-	if err != nil {
-		log.Println(err)
-	} else {
-		tcp := &TaskComplete{TaskComplete: taskComplete}
-		call("Coordinator.ResponseTask", tcp, &Empty{})
-	}
+	
 
 	return false, false
 }
@@ -97,24 +104,23 @@ func eachCall(mapf func(string, string) []KeyValue,
 
 
 
-
 func mapper(
-    filename string,
+	filename string,
 	x int,
-    Y int,
-    mapf func(string, string) []KeyValue,
-) (bool, error) {
-    
+	Y int,
+	mapf func(string, string) []KeyValue,
+) error {
+
 	// open txt!
 	contentBytes, err := ioutil.ReadFile(filename)
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	// get kvs!
 	kvs := mapf(filename, string(contentBytes))
 
-    // divide kvs! (分桶)
+	// divide kvs! (分桶)
 	mp := make(map[int][]KeyValue)
 	for _, kv := range kvs {
 		y := yOf(kv.Key, Y)
@@ -123,20 +129,20 @@ func mapper(
 
 	// write kvs into intermedia files!
 	for y := 1; y <= Y; y++ {
-		if err := intermediateFileWriter(fmt.Sprintf("mr-%d-%d", x, y),  mp[y]); err != nil { return false, err }
+		if err := intermediateFileWriter(fmt.Sprintf("mr-%d-%d", x, y), mp[y]); err != nil {
+			return err
+		}
 	}
 
-    // no problem! return true!
-	return true, nil
-	
-
+	// no problem!
+	return nil
 
 }
 
 func intermediateFileWriter(filename string, kvs []KeyValue) error {
 
 	// create file!
-	file, err := os.Create(filename)
+	file, err := os.Create(filename + ".tmp")
 	if err != nil {
 		return err
 	}
@@ -145,54 +151,60 @@ func intermediateFileWriter(filename string, kvs []KeyValue) error {
 	// write file!
 	enc := json.NewEncoder(file)
 	for _, kv := range kvs {
-		if err := enc.Encode(kv); err != nil { return err }
+		if err := enc.Encode(kv); err != nil {
+			return err
+		}
 	}
 
-	// return nil!
-	return nil
+	return os.Rename(filename + ".tmp", filename)
+	
 
 }
 
 func reducer(
-    y int,
-    X int,
-    reducef func(string, []string) string,
-) (bool, error) {
+	y int,
+	X int,
+	reducef func(string, []string) string,
+) error {
 
 	// prepair our map[key][]val!
-    mp := make(map[string][]string)
+	mp := make(map[string][]string)
 	for x := 1; x <= X; x++ {
 		file, err := os.Open(fmt.Sprintf("mr-%d-%d", x, y))
-		if err != nil { return false, err }
+		if err != nil {
+			return err
+		}
 		dec := json.NewDecoder(file)
 		for {
 			var kv KeyValue
 			err := dec.Decode(&kv)
-			if err != nil && err != io.EOF { return false, err } // decode err! 
-			if err == io.EOF { break } // end of file, so break out!
-
-			mp[kv.Key] = append(mp[kv.Key], kv.Value) // value kv!
-		} 
-
+			if err != nil && err != io.EOF {
+				return err
+			}
+			if err == io.EOF {
+				break
+			}
+			mp[kv.Key] = append(mp[kv.Key], kv.Value)
+		}
 	}
 
 	// create finalFile!
-	finalFile, err := os.Create(fmt.Sprintf("mr-out-%d", y - 1)) // y-1 here!
+	finalFile, err := os.Create(fmt.Sprintf("mr-out-%d", y-1)) // y-1 here!
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer finalFile.Close()
 
 	// fill finalFile!
 	for key, vals := range mp {
 		output := reducef(key, vals)
-		if err := fmt.Fprintf(finalFile, "%v %v\n", key, output); err != nil { return false, err }
-		
+		if err := fmt.Fprintf(finalFile, "%v %v\n", key, output); err != nil {
+			return err
+		}
 	}
 
-	// finish! return true!
-	return true, nil
-
+	// finish!
+	return nil
 
 }
 

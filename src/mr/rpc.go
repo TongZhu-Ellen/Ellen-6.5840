@@ -53,7 +53,8 @@ X & Y here are universal
 } 
 
 type TaskCompletion struct {
-	TaskComplete bool
+	LowerX int
+	LowerY int
 }
 
 
