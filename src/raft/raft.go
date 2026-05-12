@@ -329,12 +329,12 @@ func (rf *Raft) electionHelper() {
 	lastLogIndex := -1 // TODO: for 2B change here
 	rf.mu.Unlock()
 
-	var count int32 // supporter
+	count := 1 // supporter
 
 	// early-exiting requestVote process!
 	for i := 0; i < peerCount; i++ {
 		if i == me {
-			atomic.AddInt32(&count, 1) // I support myself.
+		    // I supported myself already!
 			continue
 		}
 		
@@ -347,25 +347,29 @@ func (rf *Raft) electionHelper() {
 				LastLogIndex: lastLogIndex,
 			}
 			reply := &RequestVoteReply{}
-			answered := rf.sendRequestVote(toCall, args, reply)
+			ok := rf.sendRequestVote(toCall, args, reply)
 			
-			if answered {
-				if reply.Term > myTerm {
+			if ok {
+				rf.mu.Lock()
+				defer rf.mu.Unlock()
+
+				if reply.Term > rf.currentTerm {
 					// goes back to follower!
-					rf.mu.Lock()
-					defer rf.mu.Unlock()
 					rf.currentTerm = reply.Term
 					rf.state = Follower 
 					rf.votedFor = -1 
+					return // 后续直接不用跑了。
 				}
 				if reply.VoteGranted {
-					atomic.AddInt32(&count, 1)
+					count++
 				}
-				if atomic.LoadInt32(&count) > int32(peerCount/2) {
+				if count > peerCount / 2 && rf.currentTerm == myTerm && rf.state == Candidate {
 					rf.state = Leader
-					// TODO: for 2A send heartbeat!
-					
+					// TODO: for 2A send heartbeat!注意锁的存在！
+						
 				}
+				
+				
 			}		
 		} (me, myTerm, i, lastLogTerm, lastLogIndex)
 
