@@ -95,13 +95,11 @@ type Raft struct {
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
+    rf.mu.Lock()
+    defer rf.mu.Unlock()
 
-	var term int
-	var isleader bool
-	// Your code here (2A).
-	return term, isleader
+    return rf.currentTerm, rf.state == Leader
 }
-
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
@@ -205,6 +203,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.atLeastUpToDateAs(args.LastLogTerm, args.LastLogIndex) {
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateID
+		rf.lastTouchedAt = time.Now()
 	} else {
 		reply.VoteGranted = false
 	}
@@ -304,7 +303,7 @@ func (rf *Raft) ticker() {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		rf.mu.Lock()
-		if rf.state == Follower && time.Since(rf.lastTouchedAt) > ELECTION_TIMEOUT && rf.votedFor == -1 {
+		if rf.state == Follower && time.Since(rf.lastTouchedAt) > ELECTION_TIMEOUT {
 			rf.state = Candidate
 			go rf.electionHelper()
 		}
@@ -412,7 +411,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.state = Follower
 	rf.currentTerm = 0
 	rf.votedFor = -1
-	rf.lastTouchedAt = time.Time{}
+	rf.lastTouchedAt = time.Now() // well... 
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
