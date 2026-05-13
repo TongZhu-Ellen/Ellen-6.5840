@@ -10,21 +10,10 @@ import (
 )
 
 const (
-	SELECTION_TIMEOUT = 300 * time.Millisecond
+	SELECTION_TIMEOUT = 900 * time.Millisecond
 	HEATBEAT_INTERVAL = 100 * time.Millisecond
 )
 
-type ApplyMsg struct {
-	CommandValid bool
-	Command      interface{}
-	CommandIndex int
-
-	// For 2D:
-	SnapshotValid bool
-	Snapshot      []byte
-	SnapshotTerm  int
-	SnapshotIndex int
-}
 
 type RaftState int
 const (
@@ -89,11 +78,6 @@ func (rf *Raft) ticker() {
 		// Your code here (2A)
 		// Check if a leader election should be started.
 
-
-		
-		ms := 50 + (rand.Int63() % 300)
-		time.Sleep(time.Duration(ms) * time.Millisecond)
-
 		rf.mu.Lock()
 
 		if rf.state != Leader && time.Since(rf.lastTouchedAt) > SELECTION_TIMEOUT {
@@ -103,6 +87,12 @@ func (rf *Raft) ticker() {
 
 		rf.mu.Unlock()
 
+
+		
+		ms := 50 + (rand.Int63() % 300)
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+
+		
 
 	}
 }
