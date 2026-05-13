@@ -8,6 +8,12 @@ import (
 	// "6.5840/labgob"
 	"6.5840/labrpc"
 )
+
+const (
+	SELECTION_TIMEOUT = 300 * time.Millisecond
+	HEATBEAT_INTERVAL = 100 * time.Millisecond
+)
+
 type ApplyMsg struct {
 	CommandValid bool
 	Command      interface{}
@@ -40,8 +46,10 @@ type Raft struct {
 	// state a Raft server must maintain.
 
 	currentTerm int
-	votedFor int 
 	state RaftState
+	votedFor int 
+	
+	lastTouchedAt time.Time
 
 
 }
@@ -82,10 +90,28 @@ func (rf *Raft) ticker() {
 		// Check if a leader election should be started.
 
 
-		// pause for a random amount of time between 50 and 350
-		// milliseconds.
+		
 		ms := 50 + (rand.Int63() % 300)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
+
+		rf.mu.Lock()
+
+		if rf.state != Leader && time.Since(rf.lastTouchedAt) > SELECTION_TIMEOUT {
+			rf.state = Candidate
+			go rf.election()
+		}
+
+		rf.mu.Unlock()
+
+
+	}
+}
+
+func (rf *Raft) leaderTicker() {
+	for rf.killed() == false {
+		rf.appendYourEntries()
+
+	    time.Sleep(HEATBEAT_INTERVAL)
 	}
 }
 
@@ -100,6 +126,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.currentTerm = 0
 	rf.votedFor = -1
 	rf.state = Follower
+
+	rf.lastTouchedAt = time.Now() // 一上来就触发选举很显然是不对的。
 
 
 	// initialize from state persisted before a crash

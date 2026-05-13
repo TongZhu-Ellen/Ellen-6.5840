@@ -31,7 +31,12 @@ func (rf *Raft)  appendYourEntries() {
 	}
 	
 	// 开goroutine：发送与处理返回！
-	for i := 0; i < len(rf.peers); i++ {
+	for i := 0; i < len(rf.peers) && i != rf.me; i++ {
+
+		 if i == rf.me {
+			continue
+		}
+		
 		
 		go func(server int) {
 			// 发送！
@@ -53,19 +58,16 @@ func (rf *Raft)  appendYourEntries() {
 			rf.mu.Lock()
 			defer rf.mu.Unlock()
 
-			if rf.state != Leader {
-				return // 不是leader了，我们不处理reply了！
-			}
 
 			if reply.Term > rf.currentTerm {
 				// 退回Follower！
 				rf.currentTerm = reply.Term
 				rf.state = Follower
 				rf.votedFor = -1
+				return
 			}
 
-			// 不然的话似乎没啥要做的了！
-
+			
 
 		}(i)
 
