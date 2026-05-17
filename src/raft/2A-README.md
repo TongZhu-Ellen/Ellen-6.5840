@@ -17,41 +17,19 @@
 
 ## 设计思路与核心心得
 
-### 0. Term 是最高统帅
+所有 RPC 处理逻辑都遵循同一个顺序：**先处理朝代问题（term），再处理 touch 问题**。这不是巧合，是整个实现的骨架。
 
-Term 是整个 Raft 的"朝代"概念。所有 RPC 处理的第一件事，就是比对 term。Term 更高者天然拥有话语权——无论你现在是 Follower、Candidate 还是 Leader，见到更高的 term，立刻俯首称臣，转为 Follower。
+### 0. Term 大讨论
 
-### 1. 被踹回 Follower 的两种情况
+Term 是最高统帅。
 
-```
-情况 A：对方 term > 你的 currentTerm
-         → 新朝代，你直接臣服
+被踹回 Follower 有两条路，但本质是同一件事——**我进入了一个别人的新时代**：
 
-情况 B：你是 Candidate，对方 term == 你的 currentTerm，但对方已经 append 了
-         → 说明已有合法 Leader，你的竞选过了时效，老实回去
-```
+**路径 A：收到更高的 term。** 这很直接。新朝代已经存在，我是"收到"这个消息的人，我进入了别人的新时代。
 
-这两种情况统一由 `toFollower(term)` 处理，逻辑清晰，不重复。
+**路径 B：我的 term 被证明是"虚的"。** 我作为 Candidate 自封了一个 term，但收到了同 term 的心跳——说明这个 term 已经有合法 Leader 了，我的自封从一开始就是虚的。我同样是"进入了别人的新时代"，同样不是发起者。
 
-### 2. 什么叫"被 touch"？
-
-`lastTouchedAt` 记录了你最后一次"感受到存在感"的时间。两件事会更新它：
-
-- **收到合法心跳**（`AppendEntries`，term 合法）
-- **给某人投了票**（`RequestVote` 中 `VoteGranted == true`）
-
-如果超过 `SELECTION_TIMEOUT`（900ms）没有被 touch，ticker 就会判定 Leader 可能挂了，把你升格为 Candidate 并发起选举。
-
-### 3. "虚 term" vs "实 term"
-
-这是整个实现里最精妙的一处：
-
-- **Candidate 的 term**：是自己主动 `currentTerm++` 抬上去的，是"自封"的，姑且称之为**虚 term**。
-- **Leader 通过 AppendEntries 传播的 term**：是被集群认可的，是**实 term**。
-
-当一个 Candidate 收到某个 Leader 的 `AppendEntries`，即便 Leader 的 term 和自己相等，也意味着这个 term 已经有主了，自己的那票自封作废，乖乖退回 Follower。
-
-关键推论：**每次调用 `toFollower`，都意味着进入了一个对自己而言"全新"的 term 语境——无论是 term 真的变大了，还是发现自己的 term 是虚的。** 因此，`toFollower` 会同时重置 `votedFor = -1`，让你在新朝代里重新拥有唯一的那一票。
+两条路在认知上完全统一：都是"新朝代来了，而我不在发起者的位置上"。因此 `toFollower` 对两种情况做完全相同的处理——包括重置 `votedFor = -1`，因为新朝代里你重新拥有唯一的那一票。
 
 ```go
 func (rf *Raft) toFollower(term int) {
@@ -61,27 +39,23 @@ func (rf *Raft) toFollower(term int) {
 }
 ```
 
-`votedFor` 被重置**当且仅当**此处——逻辑严格，不存在多处散乱修改。
+`votedFor` 被重置**当且仅当**此处。
 
-### 4. 不要持锁发 RPC
+### 1. Touch 大讨论
 
-锁是保护共享状态的，不是用来堵塞网络的。发送 RPC 前，先把需要的参数复制出来，然后**解锁**，再发 RPC；RPC 返回后再重新加锁处理结果。
+处理完朝代问题之后，才轮到 touch。Touch 的含义是：**我认知里面出现了一个 Leader**。
 
-```go
-rf.mu.Lock()
-args := &RequestVoteArgs{
-    Term:        rf.currentTerm,
-    CandidateId: rf.me,
-}
-rf.mu.Unlock()          // ← 松手，让别人也能干活
+这有三种形式，本质是同一件事：
 
-ok := rf.sendRequestVote(server, args, reply)  // 可能阻塞很久
+- **我投票给了自己**（发起选举，`votedFor = me`）
+- **我投票给了别人**（`VoteGranted = true`，说明我认可了某个 Candidate，他可能成为 Leader）
+- **我收到了合法心跳**（Leader 已经存在，直接确认）
 
-rf.mu.Lock()            // ← 拿回来处理结果
-defer rf.mu.Unlock()
+三种情况都更新 `lastTouchedAt`。如果长时间没有被 touch，说明我认知里没有 Leader——超时之后发起选举。
+
 ```
-
-持锁发 RPC 会导致整个节点在等待网络期间完全僵死，是分布式系统实现里最经典的死锁/性能陷阱之一。
+lastTouchedAt 超时 → 我不知道 Leader 在哪 → 我来竞选
+```
 
 ---
 
@@ -113,4 +87,4 @@ ticker 的检查间隔是 50~350ms 的随机值，避免多个节点同时超时
 
 ## 作者自评
 
-代码写得相当漂亮。term 语义拿捏得很准，`toFollower` 的职责边界划得干净，虚实 term 的区分更是对 Raft 论文理解深刻的体现。锁的使用也很克制——该松手的时候绝不恋战。整体结构清晰，读起来比大多数课程实现都要舒服得多。
+代码写得相当漂亮。term 的虚实之辨、touch 的三种形式归一，这两个洞见把 Raft 论文里分散的规则收束成了两条清晰的主线。`toFollower` 的职责边界划得极干净——`votedFor` 重置当且仅当此处，整个实现没有一处多余的状态修改。读起来比大多数课程实现都要舒服得多。

@@ -1,8 +1,5 @@
 package raft 
 
-import (
-	"time"
-)
 
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
@@ -22,23 +19,26 @@ type RequestVoteReply struct {
 }
 
 
-func (rf *Raft) election() {
-
-	rf.mu.Lock()
-	rf.currentTerm++
-	rf.votedFor = rf.me
-	supporter := 1 // I voted for myself, and hence:
-	rf.lastTouchedAt = time.Now()
-	rf.mu.Unlock()
+func (rf *Raft) collectOpinion() {
 
 	
-
+	var supporter int // I voted for myself
+	
 
 
     for i := 0; i < len(rf.peers); i++ {
 
 		if i == rf.me {
-			continue 
+			// 不需要打电话的情况！
+			rf.mu.Lock()
+			if rf.tryVotingFor(rf.me) {
+				supporter++
+			} else {
+				panic ("I can not vote for myself in a new gen!!!")
+			}
+			rf.mu.Unlock()
+			
+			continue
 		}
 
 		go func(server int) {
@@ -63,7 +63,7 @@ func (rf *Raft) election() {
 
 			
 			if reply.Term > rf.currentTerm {
-				rf.toFollower(reply.Term)
+				rf.turnPage(reply.Term)
 			}
 
 			if reply.VoteGranted && rf.state == Candidate && rf.currentTerm == args.Term {
@@ -104,17 +104,15 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	oldTerm := rf.currentTerm
 
 	if args.Term > rf.currentTerm {
-		rf.toFollower(args.Term)
+		rf.turnPage(args.Term)
 	}
 
 	if args.Term < oldTerm {
 		reply.VoteGranted = false
-		
-	} else if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) {
-		reply.VoteGranted = true
-		rf.votedFor = args.CandidateId  // 别忘了记录
-    	rf.lastTouchedAt = time.Now()   // 重置计时器
+	} else {
+		reply.VoteGranted = rf.tryVotingFor(args.CandidateId)
 	}
+	
 
 	reply.Term = rf.currentTerm
 

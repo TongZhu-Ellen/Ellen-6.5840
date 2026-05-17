@@ -75,6 +75,7 @@ func (rf *Raft) killed() bool {
 	z := atomic.LoadInt32(&rf.dead)
 	return z == 1
 }
+
 func (rf *Raft) leaderTicker() {
     for {
     
@@ -93,17 +94,18 @@ func (rf *Raft) ticker() {
 		// Your code here (2A)
 		// Check if a leader election should be started.
 
-		rf.mu.Lock()
+		rf.mu.Lock() // ------- 锁! -------
+		if time.Since(rf.lastTouchedAt) > SELECTION_TIMEOUT && rf.state != Leader {
 
-		if rf.state != Leader && time.Since(rf.lastTouchedAt) > SELECTION_TIMEOUT {
+			
+			rf.turnPage(rf.currentTerm + 1)
 			rf.state = Candidate
-			go rf.election()
+			go rf.collectOpinion()
 		}
+		rf.mu.Unlock() // ------- 锁! -------
 
-		rf.mu.Unlock()
 
-
-		
+	
 		ms := 50 + (rand.Int63() % 300)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 

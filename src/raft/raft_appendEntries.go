@@ -1,8 +1,6 @@
 package raft 
 
-import (
-    "time"
-)
+
 
 type AppendEntriesArgs struct {
 
@@ -49,7 +47,7 @@ func (rf *Raft)  appendYourEntries() {
 			defer rf.mu.Unlock()
 
 			if reply.Term > rf.currentTerm {
-				rf.toFollower(reply.Term)
+				rf.turnPage(reply.Term)
 			}
 
 
@@ -77,14 +75,16 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	oldTerm := rf.currentTerm
 
-	if args.Term > rf.currentTerm || (rf.state != Follower && args.Term == rf.currentTerm) {
-		rf.toFollower(args.Term)
+	if args.Term > rf.currentTerm { 
+		rf.turnPage(args.Term)
+	} else if rf.state == Candidate && args.Term == rf.currentTerm {
+		rf.ripPage()
 	}
 
 
 	if args.Term >= oldTerm {
 		// this is valid touch!
-		rf.lastTouchedAt = time.Now()
+		rf.touched()
 
 		// TODO: 2B
 	}
