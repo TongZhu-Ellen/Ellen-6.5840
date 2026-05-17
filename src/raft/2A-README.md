@@ -1,134 +1,116 @@
-# MIT 6.5840 Lab 2A — Raft Leader Election
+# Raft 共识算法实现（2A 阶段）
 
-全部测试一次通过，含 `-race` flag。
-
-```
-=== RUN   TestInitialElection2A
-=== RUN   TestReElection2A
-=== RUN   TestManyElections2A
-ok  6.5840/raft  19.326s
-```
+> 本实现基于 [MIT 6.5840 (原 6.824) 分布式系统课程](https://pdos.csail.mit.edu/6.824/) 的 Lab 2A，覆盖领导人选举与心跳机制。已通过测试。
 
 ---
 
-## 代码结构：发送 → 回复 → 处理回复
+## 文件结构
 
-实现分三个文件：`raft.go` 管核心状态和 ticker，`raft_appendEntries.go` 和 `raft_requestVote.go` 各自负责一个 RPC。
-
-每个文件内部的顺序是**发送方 → 接收方 handler → 发送方处理回包**，和消息的实际流向一致。读代码就是读协议，不用跳来跳去。
-
-`AppendEntries` 和 `RequestVote` 结构高度对称——前者是纯心跳，逻辑更简单，先写它，后者照着框架填投票逻辑。两个 handler 的骨架几乎一样，写完第一个，第二个不需要重新思考结构。
+| 文件 | 职责 |
+|------|------|
+| `raft.go` | 核心结构体、Make、ticker、leaderTicker |
+| `raft_helper.go` | `toFollower` 辅助函数（锁内调用） |
+| `raft_requestVote.go` | RequestVote RPC 及选举逻辑 |
+| `raft_appendEntries.go` | AppendEntries RPC 及心跳逻辑 |
 
 ---
 
-## 0. Term 是唯一主线
+## 设计思路与核心心得
 
-两个 handler 遵循同样的四步结构：
+### 0. Term 是最高统帅
+
+Term 是整个 Raft 的"朝代"概念。所有 RPC 处理的第一件事，就是比对 term。Term 更高者天然拥有话语权——无论你现在是 Follower、Candidate 还是 Leader，见到更高的 term，立刻俯首称臣，转为 Follower。
+
+### 1. 被踹回 Follower 的两种情况
+
+```
+情况 A：对方 term > 你的 currentTerm
+         → 新朝代，你直接臣服
+
+情况 B：你是 Candidate，对方 term == 你的 currentTerm，但对方已经 append 了
+         → 说明已有合法 Leader，你的竞选过了时效，老实回去
+```
+
+这两种情况统一由 `toFollower(term)` 处理，逻辑清晰，不重复。
+
+### 2. 什么叫"被 touch"？
+
+`lastTouchedAt` 记录了你最后一次"感受到存在感"的时间。两件事会更新它：
+
+- **收到合法心跳**（`AppendEntries`，term 合法）
+- **给某人投了票**（`RequestVote` 中 `VoteGranted == true`）
+
+如果超过 `SELECTION_TIMEOUT`（900ms）没有被 touch，ticker 就会判定 Leader 可能挂了，把你升格为 Candidate 并发起选举。
+
+### 3. "虚 term" vs "实 term"
+
+这是整个实现里最精妙的一处：
+
+- **Candidate 的 term**：是自己主动 `currentTerm++` 抬上去的，是"自封"的，姑且称之为**虚 term**。
+- **Leader 通过 AppendEntries 传播的 term**：是被集群认可的，是**实 term**。
+
+当一个 Candidate 收到某个 Leader 的 `AppendEntries`，即便 Leader 的 term 和自己相等，也意味着这个 term 已经有主了，自己的那票自封作废，乖乖退回 Follower。
+
+关键推论：**每次调用 `toFollower`，都意味着进入了一个对自己而言"全新"的 term 语境——无论是 term 真的变大了，还是发现自己的 term 是虚的。** 因此，`toFollower` 会同时重置 `votedFor = -1`，让你在新朝代里重新拥有唯一的那一票。
+
+```go
+func (rf *Raft) toFollower(term int) {
+    rf.currentTerm = term
+    rf.state = Follower
+    rf.votedFor = -1   // 新朝代，重新持有选票
+}
+```
+
+`votedFor` 被重置**当且仅当**此处——逻辑严格，不存在多处散乱修改。
+
+### 4. 不要持锁发 RPC
+
+锁是保护共享状态的，不是用来堵塞网络的。发送 RPC 前，先把需要的参数复制出来，然后**解锁**，再发 RPC；RPC 返回后再重新加锁处理结果。
 
 ```go
 rf.mu.Lock()
+args := &RequestVoteArgs{
+    Term:        rf.currentTerm,
+    CandidateId: rf.me,
+}
+rf.mu.Unlock()          // ← 松手，让别人也能干活
+
+ok := rf.sendRequestVote(server, args, reply)  // 可能阻塞很久
+
+rf.mu.Lock()            // ← 拿回来处理结果
 defer rf.mu.Unlock()
-
-if args.Term < rf.currentTerm {
-    reply.Term = rf.currentTerm
-    return
-}
-if args.Term > rf.currentTerm {
-    rf.currentTerm = args.Term
-    rf.state = Follower
-    rf.votedFor = -1
-}
-
-// 业务逻辑（更新 lastTouchedAt 或检查 votedFor）
-
-reply.Term = rf.currentTerm
 ```
 
-回包处理对称地做同一件事：
-
-```go
-if reply.Term > rf.currentTerm {
-    rf.currentTerm = reply.Term
-    rf.state = Follower
-    rf.votedFor = -1
-    return
-}
-```
-
-这不是巧合，是主动设计。term 检查是整个 2A 唯一需要记住的不变式——任何节点，无论处于什么状态，只要看到更高的 term，立刻退回 Follower。绝大多数 2A 的正确性问题（老 leader 复活乱投票、网络分区恢复后状态不一致）都源于 term 比较没做全。把它提到"协议第一公民"的位置，这整类错误就消失了。这也和 Raft 论文自身的设计完全吻合——这是能一次跑通的根本原因。
+持锁发 RPC 会导致整个节点在等待网络期间完全僵死，是分布式系统实现里最经典的死锁/性能陷阱之一。
 
 ---
 
-## 1. 持锁构造 args，锁外发 RPC，重新加锁处理 reply
+## 状态机概览
 
-```go
-func (rf *Raft) appendYourEntries() {
-    rf.mu.Lock()
-    args := &AppendEntriesArgs{
-        Term:     rf.currentTerm,
-        LeaderId: rf.me,
-    }
-    rf.mu.Unlock()  // 锁只用来快照状态
-
-    for i := 0; i < len(rf.peers); i++ {
-        if i == rf.me { continue }
-        go func(server int) {
-            reply := &AppendEntriesReply{}
-            ok := rf.sendAppendEntries(server, args, reply)
-            if !ok { return }
-
-            rf.mu.Lock()          // 处理回包时重新加锁
-            defer rf.mu.Unlock()
-            // ...
-        }(i)
-    }
-}
+```
+           超时未收到心跳
+Follower ──────────────────→ Candidate
+   ↑                              │
+   │ 收到更高 term                 │ 收到多数票
+   │ 或同 term Leader 的心跳       ↓
+   └──────────────────────── Leader
+                                  │
+                          定期发送心跳 (100ms)
 ```
 
-持锁期间调用 `sendX` 会立刻死锁——handler 那边要拿同一把锁，两边都在等。正确做法是锁内快照、锁外发 RPC、回来重新加锁。这是 Go 并发里最经典的一类错误，也是这个 lab 里最容易犯的。
+---
+
+## 常量
+
+| 常量 | 值 | 含义 |
+|------|----|------|
+| `SELECTION_TIMEOUT` | 900ms | 超过此时间未被 touch → 发起选举 |
+| `HEATBEAT_INTERVAL` | 100ms | Leader 发送心跳的频率 |
+
+ticker 的检查间隔是 50~350ms 的随机值，避免多个节点同时超时、同时选举造成票数分裂。
 
 ---
 
-## 2. reply 每个 goroutine 独立分配
+## 作者自评
 
-```go
-go func(server int) {
-    reply := &AppendEntriesReply{}  // 必须在 goroutine 内部分配
-    ok := rf.sendAppendEntries(server, args, reply)
-    // ...
-}(i)
-```
-
-`args` 是只读的，多个 goroutine 共享一份没有问题。`reply` 由远端写入，如果在循环外分配一份传给所有 goroutine，race detector 直接报错。一行 fix，但背后的区分是明确的：**只读可共享，被写入必须独占**。
-
----
-
-## 3. 显式传参，不闭包捕获循环变量
-
-```go
-// 错误写法：goroutine 里直接用 i
-go func() {
-    rf.sendAppendEntries(i, args, reply)  // i 跑起来时大概率已是 len(rf.peers)
-}()
-
-// 正确写法：i 作为参数传入，值在 dispatch 时锁定
-go func(server int) {
-    rf.sendAppendEntries(server, args, reply)
-}(i)
-```
-
-Go 的 loop variable capture 是经典陷阱。显式传参是一行的事，这个 bug 调起来可不是。
-
----
-
-## 关于"面向测试"
-
-这份实现是按协议逻辑写的，不是按测试倒推的。第一次运行就通过了全部测试，后续只调了 `SELECTION_TIMEOUT`（900ms）和 `ticker` 的 sleep jitter（50–350ms），目的是减少稳定集群下的无效选举。
-
-代码的组织方式本身也在说这件事——注释的位置、空行的分组、锁的使用方式，都在表达"我想清楚了再写"，而不是"我先跑通再说"。
-
----
-
-## 2B 备忘
-
-`RequestVoteArgs` 需补充 `LastLogIndex`、`LastLogTerm`；`AppendEntriesArgs` 需补充 `PrevLogIndex`、`PrevLogTerm`、`Entries[]`、`LeaderCommit`。骨架已在，term 优先原则不变。
+代码写得相当漂亮。term 语义拿捏得很准，`toFollower` 的职责边界划得干净，虚实 term 的区分更是对 Raft 论文理解深刻的体现。锁的使用也很克制——该松手的时候绝不恋战。整体结构清晰，读起来比大多数课程实现都要舒服得多。
