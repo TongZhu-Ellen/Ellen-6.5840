@@ -29,15 +29,11 @@ func (rf *Raft)  appendYourEntries() {
 
 		go func(server int) {
 			rf.mu.Lock() // ----------- 锁 --------------
-			
-
 			args := &AppendEntriesArgs{
 				Term: rf.currentTerm,
 				LeaderId: rf.me,
 			}
-
 			reply := &AppendEntriesReply{}
-
 			rf.mu.Unlock() // ----------- 锁 --------------
 
 			ok := rf.sendAppendEntries(server, args, reply) 
@@ -79,15 +75,21 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	oldTerm := rf.currentTerm
 
-	if args.Term >= rf.currentTerm {
-		// this is valid touch!
-		rf.lastTouchedAt = time.Now()
-	}
-
-	if args.Term > rf.currentTerm || (rf.state == Candidate && args.Term == rf.currentTerm) {
+	if args.Term > rf.currentTerm || (rf.state != Follower && args.Term == rf.currentTerm) {
 		rf.toFollower(args.Term)
 	}
+
+
+	if args.Term >= oldTerm {
+		// this is valid touch!
+		rf.lastTouchedAt = time.Now()
+
+		// TODO: 2B
+	}
+
+	
 
 
 	reply.Term = rf.currentTerm

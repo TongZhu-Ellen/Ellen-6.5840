@@ -43,15 +43,11 @@ func (rf *Raft) election() {
 
 		go func(server int) {
 			rf.mu.Lock() // ------- 锁 -------
-			
-
 			args := &RequestVoteArgs{
 				Term: rf.currentTerm,
 				CandidateId: rf.me,
 			}
-
 			reply := &RequestVoteReply{}
-
 			rf.mu.Unlock() // ------- 锁 -------
 
 			ok := rf.sendRequestVote(server, args, reply)
