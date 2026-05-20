@@ -14,6 +14,11 @@ const (
 	HEATBEAT_INTERVAL = 100 * time.Millisecond
 )
 
+type Entry struct {
+    Term    int         // 该 entry 是在哪个 leader term 写入的
+    Command interface{} 
+}
+
 
 type RaftState int
 const (
@@ -39,8 +44,41 @@ type Raft struct {
 	votedFor int 
 	
 	lastTouchedAt time.Time
+	log []Entry
+
+	commitIndex int 
+	lastApplied int
+
+	// for leader only:
+	nextIndex []int
+	matchIndex []int
+
+}
+
+func Make(peers []*labrpc.ClientEnd, me int,
+	persister *Persister, applyCh chan ApplyMsg) *Raft {
+	rf := &Raft{}
+	rf.peers = peers
+	rf.persister = persister
+	rf.me = me
+
+	// Your initialization code here (2A, 2B, 2C).
+	rf.currentTerm = 0
+	rf.votedFor = -1
+	rf.state = Follower
+
+	rf.lastTouchedAt = time.Now() // 一上来就触发选举很显然是不对的。
+	rf.log = make([]Entry, 1) // first index is 1 
 
 
+	// initialize from state persisted before a crash
+	rf.readPersist(persister.ReadRaftState())
+
+	// start ticker goroutine to start elections
+	go rf.ticker()
+
+
+	return rf
 }
 
 func (rf *Raft) GetState() (int, bool) {
@@ -116,27 +154,4 @@ func (rf *Raft) ticker() {
 
 
 
-func Make(peers []*labrpc.ClientEnd, me int,
-	persister *Persister, applyCh chan ApplyMsg) *Raft {
-	rf := &Raft{}
-	rf.peers = peers
-	rf.persister = persister
-	rf.me = me
 
-	// Your initialization code here (2A, 2B, 2C).
-	rf.currentTerm = 0
-	rf.votedFor = -1
-	rf.state = Follower
-
-	rf.lastTouchedAt = time.Now() // 一上来就触发选举很显然是不对的。
-
-
-	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
-
-	// start ticker goroutine to start elections
-	go rf.ticker()
-
-
-	return rf
-}

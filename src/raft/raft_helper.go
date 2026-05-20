@@ -29,10 +29,16 @@ func (rf *Raft) ripPage() {
 
 
 
-func (rf *Raft) tryVotingFor(server int) bool {
+func (rf *Raft) tryVotingFor(candidate int, lastLogIndex int, lastLogTerm int) bool {
 	
-	if rf.votedFor == -1 || rf.votedFor == server {
-		rf.votedFor = server
+	myLastTerm := rf.log[len(rf.log)-1].Term
+	myLastIndex := len(rf.log) - 1
+	
+	upToDate := lastLogTerm > myLastTerm || 
+            (lastLogTerm == myLastTerm && lastLogIndex >= myLastIndex)
+
+	if (rf.votedFor == -1 || rf.votedFor == candidate) && upToDate {
+		rf.votedFor = candidate
 		rf.lastTouchedAt = time.Now()
 		return true
 	}
@@ -40,9 +46,16 @@ func (rf *Raft) tryVotingFor(server int) bool {
 	return false
 }
 
-func (rf *Raft) touched()  {
+func (rf *Raft) touched() {
 
 	rf.lastTouchedAt = time.Now()
+}
+
+func min(a int, b int) int {
+	if a <= b {
+		return a
+	} 
+	return b
 }
 
 

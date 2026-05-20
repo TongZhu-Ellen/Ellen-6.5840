@@ -6,6 +6,10 @@ type RequestVoteArgs struct {
 
 	Term int // candidate's term!
 	CandidateId int
+
+	// 2B:
+	LastLogIndex int 
+	LastLogTerm int
 }
 
 // example RequestVote RPC reply structure.
@@ -37,15 +41,18 @@ func (rf *Raft) collectOpinion() {
 				panic ("I can not vote for myself in a new gen!!!")
 			}
 			rf.mu.Unlock()
-			
 			continue
 		}
 
 		go func(server int) {
 			rf.mu.Lock() // ------- 锁 -------
+			lastLogIndex := len(rf.log) - 1
 			args := &RequestVoteArgs{
 				Term: rf.currentTerm,
 				CandidateId: rf.me,
+
+				LastLogIndex: lastLogIndex,
+				LastLogTerm: rf.log[lastLogIndex].Term,
 			}
 			reply := &RequestVoteReply{}
 			rf.mu.Unlock() // ------- 锁 -------
@@ -69,8 +76,20 @@ func (rf *Raft) collectOpinion() {
 			if reply.VoteGranted && rf.state == Candidate && rf.currentTerm == args.Term {
 				supporter++
 				if supporter > len(rf.peers) / 2 {
-					// become leader!!!
-					rf.state = Leader 
+					rf.state = Leader
+
+					lastLogIndex := len(rf.log) - 1
+
+					rf.nextIndex = make([]int, len(rf.peers)) // "initialized to leader's lastLogIndex + 1"
+					rf.matchIndex = make([]int, len(rf.peers)) // "initialized to 0"
+
+					for i := range rf.peers {
+						rf.nextIndex[i] = lastLogIndex + 1 
+						rf.matchIndex[i] = 0
+					}
+
+					rf.matchIndex[rf.me] = lastLogIndex
+
 					go rf.leaderTicker()
 				}
 			}
@@ -101,19 +120,21 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	oldTerm := rf.currentTerm
+	
 
 	if args.Term > rf.currentTerm {
 		rf.turnPage(args.Term)
 	}
 
-	if args.Term < oldTerm {
+	if args.Term < rf.currentTerm {
 		reply.VoteGranted = false
-	} else {
-		reply.VoteGranted = rf.tryVotingFor(args.CandidateId)
-	}
-	
+		reply.Term = rf.currentTerm
+		return 
+		
+	} 
 
+
+	reply.VoteGranted = rf.tryVotingFor(args.CandidateId, args.LastLogIndex, args.LastLogTerm)
 	reply.Term = rf.currentTerm
 
 
