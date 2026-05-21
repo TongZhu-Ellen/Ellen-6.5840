@@ -24,6 +24,10 @@ type AppendEntriesReply struct {
 	// 2B:
 	Success bool
 
+	XTerm   int  // 冲突的 term
+    XIndex  int  // 该 term 第一条 log 的 index
+    XLen    int  // log 长度（用于 prevLogIndex 超出范围的情况）
+
 }
 
 // helper func; can only be called by leader!
@@ -79,11 +83,31 @@ func (rf *Raft)  appendYourEntries() {
 			if reply.Success {
 				rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
 				rf.nextIndex[server] = rf.matchIndex[server] + 1
-			} else if rf.nextIndex[server] - 1 >= 1 {
-				rf.nextIndex[server]--
-				return
 			} else {
-				panic("nextIndex already at 1 but still failing — something is deeply wrong")
+
+				if reply.XTerm == -1 {
+					// 情况1：follower 日志太短
+					rf.nextIndex[server] = reply.XLen
+				} else {
+					// 情况2：找 leader 日志里有没有 XTerm
+					found := -1
+					for i := len(rf.log) - 1; i >= 1; i-- {
+						if rf.log[i].Term == reply.XTerm {
+							found = i
+							break
+						}
+					}
+					if found != -1 {
+						// 找到了（found != -1）：leader 也有这个 term，说明这个 term 的日志两边都有，冲突在这个 term 的结尾之后。从 found + 1 开始发。
+						rf.nextIndex[server] = found + 1
+					} else {
+						// 没找到（found == -1）：leader 没有这个 term，follower 这个 term 的日志全是错的。从 follower 这个 term 的开头 XIndex 开始覆盖。
+						rf.nextIndex[server] = reply.XIndex
+					}
+				}
+
+				return 
+
 			}
 
 			
@@ -150,10 +174,26 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	// 2. "Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm"
-    if args.PrevLogIndex >= len(rf.log) || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+    if args.PrevLogIndex >= len(rf.log) {
+		reply.XTerm = -1
+		reply.XIndex = -1
+		reply.XLen = len(rf.log)
 		reply.Term = rf.currentTerm
 		reply.Success = false
-		return 
+		return
+	}
+
+	if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		reply.XTerm = rf.log[args.PrevLogIndex].Term
+		xIndex := args.PrevLogIndex
+		for xIndex - 1 >= 1 && rf.log[xIndex-1].Term == reply.XTerm {
+			xIndex--
+		}
+		reply.XIndex = xIndex
+		reply.XLen = -1
+		reply.Term = rf.currentTerm
+		reply.Success = false
+		return
 	}
 
 
