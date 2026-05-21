@@ -12,6 +12,7 @@ import (
 const (
 	SELECTION_TIMEOUT = 900 * time.Millisecond
 	HEATBEAT_INTERVAL = 100 * time.Millisecond
+	APPLY_INTERVAL = 10 * time.Millisecond
 )
 
 type Entry struct {
@@ -34,10 +35,10 @@ type Raft struct {
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
+	applyCh   chan ApplyMsg
+
 
 	// Your data here (2A, 2B, 2C).
-	// Look at the paper's Figure 2 for a description of what
-	// state a Raft server must maintain.
 
 	currentTerm int
 	state RaftState
@@ -55,12 +56,39 @@ type Raft struct {
 
 }
 
+func (rf *Raft) Start(command interface{}) (int, int, bool) {
+
+	// Your code here (2B).
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+
+	if rf.state != Leader {
+		return -1, -1, false
+	}
+
+	entry := Entry{
+		Term: rf.currentTerm,
+		Command: command,
+	}
+	
+	rf.log = append(rf.log, entry)
+
+	index := len(rf.log) - 1 // index to be inserted to!
+	term := rf.currentTerm
+	isLeader := rf.state == Leader
+
+	return index, term, isLeader
+}
+
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
+	rf.applyCh = applyCh
 
 	// Your initialization code here (2A, 2B, 2C).
 	rf.currentTerm = 0
@@ -75,7 +103,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.readPersist(persister.ReadRaftState())
 
 	// start ticker goroutine to start elections
-	go rf.ticker()
+	go rf.electionTicker()
+	go rf.applyTicker()
 
 
 	return rf
@@ -91,17 +120,6 @@ func (rf *Raft) GetState() (int, bool) {
 	defer rf.mu.Unlock()
 
 	return rf.currentTerm, rf.state == Leader
-}
-
-func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
-
-	// Your code here (2B).
-
-
-	return index, term, isLeader
 }
 
 func (rf *Raft) Kill() {
@@ -126,7 +144,7 @@ func (rf *Raft) leaderTicker() {
     }
 }
 
-func (rf *Raft) ticker() {
+func (rf *Raft) electionTicker() {
 	for rf.killed() == false {
 
 		// Your code here (2A)
@@ -149,6 +167,28 @@ func (rf *Raft) ticker() {
 
 		
 
+	}
+}
+
+// "If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied] to state machine"
+func (rf *Raft) applyTicker() {
+	for rf.killed() == false {
+
+		rf.mu.Lock() // ------- 锁! -------
+		for rf.commitIndex > rf.lastApplied {
+			rf.lastApplied++
+			msg := ApplyMsg{
+				CommandValid: true,
+				Command: rf.log[rf.lastApplied].Command,
+				CommandIndex: rf.lastApplied,
+			}
+			rf.mu.Unlock() // ------- 锁! -------
+			rf.applyCh <- msg
+			rf.mu.Lock() // ------- 锁! -------
+		}
+		rf.mu.Unlock() // ------- 锁! -------
+
+		time.Sleep(APPLY_INTERVAL)
 	}
 }
 

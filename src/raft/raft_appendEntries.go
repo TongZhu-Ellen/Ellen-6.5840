@@ -70,17 +70,20 @@ func (rf *Raft)  appendYourEntries() {
 				rf.turnPage(reply.Term)
 			}
 
-			if term, leads := rf.GetState(); term != args.Term || !leads {
+			if rf.currentTerm != args.Term || rf.state != Leader {
 				return
 			}
 
 			// "If successful: update nextIndex and matchIndex for follower"
-			// "If AppendEntries fails because of log inconsistency: decrement nextIndex and retry "
+			// "If AppendEntries fails because of log inconsistency: decrement nextIndex and retry"
 			if reply.Success {
 				rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
 				rf.nextIndex[server] = rf.matchIndex[server] + 1
-			} else {
+			} else if rf.nextIndex[server] - 1 >= 1 {
 				rf.nextIndex[server]--
+				return
+			} else {
+				panic("nextIndex already at 1 but still failing — something is deeply wrong")
 			}
 
 			
@@ -89,6 +92,10 @@ func (rf *Raft)  appendYourEntries() {
 			for N := len(rf.log) - 1; N > rf.commitIndex; N-- {
 				count := 0
 				for i := 0; i < len(rf.peers); i++ {
+					if i == rf.me {
+						count++
+						continue
+					}
 					if rf.matchIndex[i] >= N {
 						count++
 					}

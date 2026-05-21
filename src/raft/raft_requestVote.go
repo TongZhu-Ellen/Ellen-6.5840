@@ -35,7 +35,8 @@ func (rf *Raft) collectOpinion() {
 		if i == rf.me {
 			// 不需要打电话的情况！
 			rf.mu.Lock()
-			if rf.tryVotingFor(rf.me) {
+			lastLogIndex := len(rf.log) - 1
+			if rf.tryVotingFor(rf.me, lastLogIndex, rf.log[lastLogIndex].Term) {
 				supporter++
 			} else {
 				panic ("I can not vote for myself in a new gen!!!")
@@ -88,7 +89,8 @@ func (rf *Raft) collectOpinion() {
 						rf.matchIndex[i] = 0
 					}
 
-					rf.matchIndex[rf.me] = lastLogIndex
+					rf.nextIndex[rf.me] = -1
+					rf.matchIndex[rf.me] = -1
 
 					go rf.leaderTicker()
 				}
