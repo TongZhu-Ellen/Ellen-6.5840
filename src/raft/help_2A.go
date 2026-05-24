@@ -11,6 +11,14 @@ set currentTerm = T, convert to follower
 */
 
 
+func (rf *Raft) becomeCandidate() {
+	rf.currentTerm++	
+	rf.state = Candidate
+	rf.votedFor = rf.me
+	
+	rf.persist()
+}
+
 
 func (rf *Raft) turnPage(term int) { 
 
@@ -18,6 +26,7 @@ func (rf *Raft) turnPage(term int) {
 	rf.state = Follower
 	rf.votedFor = -1
 
+	rf.persist()
 }
 
 func (rf *Raft) ripPage() {
@@ -25,6 +34,8 @@ func (rf *Raft) ripPage() {
 	rf.state = Follower
 	rf.votedFor = -1
 
+	rf.persist()
+	
 }
 
 
@@ -38,8 +49,13 @@ func (rf *Raft) tryVotingFor(candidate int, lastLogIndex int, lastLogTerm int) b
             (lastLogTerm == myLastTerm && lastLogIndex >= myLastIndex)
 
 	if (rf.votedFor == -1 || rf.votedFor == candidate) && upToDate {
+		
+		// 更改！
 		rf.votedFor = candidate
 		rf.lastTouchedAt = time.Now()
+		// persist！
+		rf.persist()
+		// return！
 		return true
 	}
 

@@ -68,7 +68,7 @@ func (rf *Raft) updateCommitIndex() {
     }
 }
 
-// startOfTerm returns the first log index with the given term, or -1 if not found.
+// lastOfTerm returns the last log index with the given term, or -1 if not found.
 func (rf *Raft) lastIndexOfTerm(term int) int {
     for i := len(rf.log) - 1; i >= 1; i-- {
         if rf.log[i].Term == term {

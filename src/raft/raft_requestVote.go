@@ -26,22 +26,13 @@ type RequestVoteReply struct {
 func (rf *Raft) collectOpinion() {
 
 	
-	var supporter int // I voted for myself
+	supporter := 1
 	
 
 
     for i := 0; i < len(rf.peers); i++ {
 
 		if i == rf.me {
-			// 不需要打电话的情况！
-			rf.mu.Lock()
-			lastLogIndex := len(rf.log) - 1
-			if rf.tryVotingFor(rf.me, lastLogIndex, rf.log[lastLogIndex].Term) {
-				supporter++
-			} else {
-				panic ("I can not vote for myself in a new gen!!!")
-			}
-			rf.mu.Unlock()
 			continue
 		}
 

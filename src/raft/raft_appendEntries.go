@@ -186,10 +186,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	
 
-
-
-	
-
+	rf.persist()
     rf.touched()
 	reply.Term = rf.currentTerm
 	reply.Success = true

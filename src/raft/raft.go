@@ -5,7 +5,6 @@ import (
 	"sync/atomic"
 	"math/rand"
 	"time"
-	// "6.5840/labgob"
 	"6.5840/labrpc"
 )
 
@@ -74,6 +73,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 	
 	rf.log = append(rf.log, entry)
+	rf.persist()
 
 	index := len(rf.log) - 1 // index to be inserted to!
 	term := rf.currentTerm
@@ -154,8 +154,7 @@ func (rf *Raft) electionTicker() {
 		if time.Since(rf.lastTouchedAt) > SELECTION_TIMEOUT && rf.state != Leader {
 
 			
-			rf.turnPage(rf.currentTerm + 1)
-			rf.state = Candidate
+			rf.becomeCandidate()
 			go rf.collectOpinion()
 		}
 		rf.mu.Unlock() // ------- 锁! -------
