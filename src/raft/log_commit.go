@@ -21,7 +21,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	
 	rf.append(entry)
 
-	index := len(rf.log) - 1 // index to be inserted to! 2D估计要改！
+	index := rf.logLength() - 1 // index to be inserted to! 
 	term := rf.currentTerm
 	isLeader := rf.state == Leader
 

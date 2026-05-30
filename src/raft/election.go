@@ -37,13 +37,13 @@ func (rf *Raft) collectOpinion() {
 
 		go func(server int) {
 			rf.mu.Lock() // ------- 锁 -------
-			lastLogIndex := len(rf.log) - 1
+			lastLogIndex := rf.logLength() - 1
 			args := &RequestVoteArgs{
 				Term: rf.currentTerm,
 				CandidateId: rf.me,
 
 				LastLogIndex: lastLogIndex,
-				LastLogTerm: rf.log[lastLogIndex].Term,
+				LastLogTerm: rf.get(lastLogIndex).Term,
 			}
 			reply := &RequestVoteReply{}
 			rf.mu.Unlock() // ------- 锁 -------

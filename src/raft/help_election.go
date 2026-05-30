@@ -30,7 +30,7 @@ func (rf *Raft) becomeCandidate() {
 func (rf *Raft) becomeLeader() {
 	rf.state = Leader
 
-	lastLogIndex := len(rf.log) - 1
+	lastLogIndex := rf.logLength() - 1
 
 	rf.nextIndex = make([]int, len(rf.peers))  
 	rf.matchIndex = make([]int, len(rf.peers)) 
@@ -65,8 +65,9 @@ func (rf *Raft) newGen(term int) {
 
 func (rf *Raft) tryVotingFor(candidate int, lastLogIndex int, lastLogTerm int) bool {
 	
-	myLastTerm := rf.log[len(rf.log)-1].Term
-	myLastIndex := len(rf.log) - 1
+	myLastIndex := rf.logLength() - 1
+	myLastTerm := rf.get(myLastIndex).Term
+	
 	
 	upToDate := lastLogTerm > myLastTerm || 
             (lastLogTerm == myLastTerm && lastLogIndex >= myLastIndex)

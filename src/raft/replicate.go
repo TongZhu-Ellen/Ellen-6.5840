@@ -75,6 +75,7 @@ func (rf *Raft) singleAppend(i int) (retry bool) {
     // ----------- Server 处理中！ --------------
 
 	if !ok { // 这是没发出去...  
+		time.Sleep(10 * time.Millisecond)
 		return true
 	}
 
