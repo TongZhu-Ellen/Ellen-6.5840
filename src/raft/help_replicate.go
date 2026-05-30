@@ -46,7 +46,7 @@ func (rf *Raft) updateCommitIndex() {
             }
         }
         // 多数派已复制 且 该条目属于当前任期（Raft 安全性要求）
-        if count > len(rf.peers)/2 && rf.log[N].Term == rf.currentTerm {
+        if count > len(rf.peers)/2 && rf.get(N).Term == rf.currentTerm {
             rf.commitIndex = N // 推进 commitIndex
             rf.bEffortKick()
             break              // 找到最大的 N 即可，立即停止

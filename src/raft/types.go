@@ -80,6 +80,10 @@ type Raft struct {
 	nextIndex []int
 	matchIndex []int
 
+	// 2D:
+	snapshotIndex int  // 最后一个被 snapshot 的 index
+	snapshotTerm  int  // 那个 index 的 term
+
 }
 
 

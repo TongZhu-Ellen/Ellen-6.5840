@@ -173,7 +173,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	 rf.touched()
 
 	// 2. "Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm"
-    if args.PrevLogIndex >= len(rf.log) {
+    if args.PrevLogIndex >= rf.logLength() {
 		reply.XTerm = -1
 		reply.XIndex = -1
 		reply.XLen = rf.logLength()
@@ -201,8 +201,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	myIdx := args.PrevLogIndex + 1
 	yourIdx := 0 
 
-	for myIdx < len(rf.log) && yourIdx < len(args.Entries) {
-		if rf.log[myIdx].Term != args.Entries[yourIdx].Term {
+	for myIdx < rf.logLength() && yourIdx < len(args.Entries) {
+		if rf.get(myIdx).Term != args.Entries[yourIdx].Term {
 			rf.log = rf.log[ : myIdx] // 连同这个也不要了。2D需要更改。
 			break
 		} 

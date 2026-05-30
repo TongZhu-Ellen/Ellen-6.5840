@@ -29,6 +29,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.lastTouchedAt = time.Now() // 一上来就触发选举很显然是不对的。
 	rf.log = []Entry{{Term: -1}} // first index is 1 
 
+	rf.snapshotIndex = 0
+	rf.snapshotTerm = -1
+
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
