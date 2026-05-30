@@ -58,6 +58,14 @@ func (rf *Raft) singleAppend(i int) (retry bool) {
 		return false
 	}
 	prevLogIndex := rf.nextIndex[i] - 1
+
+	// 2D:
+	if prevLogIndex < rf.snapIndex {
+		rf.helpInstall(i) 
+		rf.mu.Unlock()
+		return false
+	}
+	
     args := &AppendEntriesArgs{
 		Term: rf.currentTerm,
 		LeaderId: rf.me,
@@ -170,7 +178,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return 
 	}
 
-	 rf.touched()
+	rf.touched()
+
 
 	// 2. "Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm"
     if args.PrevLogIndex >= rf.logLength() {

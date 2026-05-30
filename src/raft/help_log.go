@@ -7,15 +7,15 @@ package raft
 
 
 func (rf *Raft) get(i int) Entry {
-    return rf.log[i - rf.snapshotIndex]
+    return rf.log[i - rf.snapIndex]
 }
 
 func (rf *Raft) entriesFrom(start int) []Entry {
-    return append([]Entry{}, rf.log[start - rf.snapshotIndex:]...)
+    return append([]Entry{}, rf.log[start - rf.snapIndex:]...)
 }
 
 func (rf *Raft) logLength() int {
-    return len(rf.log) + rf.snapshotIndex
+    return len(rf.log) + rf.snapIndex
 }
 
 

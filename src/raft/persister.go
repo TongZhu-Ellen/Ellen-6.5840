@@ -17,7 +17,10 @@ func (rf *Raft) persist() {
     e.Encode(rf.currentTerm)
     e.Encode(rf.votedFor)
     e.Encode(rf.log)
-    rf.persister.Save(w.Bytes(), nil)
+	// 2D
+	e.Encode(rf.snapIndex)
+    e.Encode(rf.snapTerm)
+    rf.persister.Save(w.Bytes(), rf.snapshot)
 }
 
 
@@ -30,16 +33,22 @@ func (rf *Raft) readPersist(data []byte) {
     var currentTerm int
     var votedFor int
     var log []Entry
+    var snapIndex int
+    var snapTerm int
     if d.Decode(&currentTerm) != nil ||
        d.Decode(&votedFor) != nil ||
-       d.Decode(&log) != nil {
+       d.Decode(&log) != nil ||
+       d.Decode(&snapIndex) != nil ||
+       d.Decode(&snapTerm) != nil {
         panic("readPersist failed")
     }
     rf.currentTerm = currentTerm
     rf.votedFor = votedFor
     rf.log = log
+    rf.snapIndex = snapIndex
+    rf.snapTerm = snapTerm
+	rf.snapshot = rf.persister.ReadSnapshot()
 }
-
 
 
 
@@ -49,6 +58,21 @@ func (rf *Raft) readPersist(data []byte) {
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
+
+	rf.mu.Lock()
+    defer rf.mu.Unlock()
+
+    if index <= rf.snapIndex {
+        return // 已经 snapshot 过了
+    }
+
+	snapTerm := rf.get(index).Term
+	rf.log = append([]Entry{Entry{}}, rf.log[index-rf.snapIndex+1:]...)
+	rf.snapIndex = index // 只能增大！
+	rf.snapTerm = snapTerm
+	rf.snapshot = snapshot
+
+	rf.persist() // 同时保存 snapshot
 
 }
 

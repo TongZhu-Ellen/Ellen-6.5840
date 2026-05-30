@@ -34,7 +34,7 @@ package raft
 // leader专属函数
 func (rf *Raft) updateCommitIndex() {
     // 从最新日志往前找，寻找可以提交的最大 N
-    for N := len(rf.log) - 1; N > rf.commitIndex; N-- {
+    for N := rf.logLength() - 1; N > rf.commitIndex; N-- {
         count := 0
         for i := 0; i < len(rf.peers); i++ {
             if i == rf.me {
@@ -60,7 +60,7 @@ func (rf *Raft) updateCommitIndex() {
 
 // lastOfTerm returns the last log index with the given term, or -1 if not found.
 func (rf *Raft) lastIndexOfTerm(term int) int {
-    for i := rf.logLength() - 1; i >= 1; i-- {
+    for i := rf.logLength() - 1; i > rf.snapIndex; i-- {
         if rf.get(i).Term == term {
             return i
         }
