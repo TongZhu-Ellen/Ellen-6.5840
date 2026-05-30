@@ -3,11 +3,7 @@ package raft
 
 
 
-func (rf *Raft) append(entry Entry) {
-	rf.log = append(rf.log, entry)
-	rf.bEffortKick()
-	rf.persist()
-}
+
 
 
 
@@ -21,7 +17,37 @@ func (rf *Raft) entriesFrom(start int) []Entry {
 	return append([]Entry{}, rf.log[start:]...)
 }
 
+func (rf *Raft) logLength() int {
+	return len(rf.log)
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 func (rf *Raft) set(i int, entry Entry) {
 	rf.log[i] = entry
 	rf.persist()
+}
+
+func (rf *Raft) append(entry Entry) {
+
+	rf.log = append(rf.log, entry)
+	rf.bEffortKick()
+	rf.persist()
+}
+
+func (rf *Raft) batchAppend(entries []Entry) {
+    rf.log = append(rf.log, entries...)
+    rf.bEffortKick()
+    rf.persist()
 }

@@ -57,3 +57,34 @@ func (rf *Raft) updateCommitIndex() {
 
 
 
+
+// lastOfTerm returns the last log index with the given term, or -1 if not found.
+func (rf *Raft) lastIndexOfTerm(term int) int {
+    for i := rf.logLength() - 1; i >= 1; i-- {
+        if rf.get(i).Term == term {
+            return i
+        }
+    }
+    return -1
+}
+
+// leader专属函数
+func (rf *Raft) stepBack(server int, xTerm, xIndex, xLen int) {
+    // 情况1：follower 日志太短
+    if xTerm == -1 {
+        rf.nextIndex[server] = min(xLen, rf.logLength())
+        return
+    }
+    // 情况2：找 leader 日志里有没有 XTerm
+    if term := rf.lastIndexOfTerm(xTerm); term != -1 {
+        // leader 也有这个 term，冲突在这个 term 的结尾之后，从 start + 1 开始发
+        rf.nextIndex[server] = term + 1
+    } else {
+        // leader 没有这个 term，follower 这个 term 的日志全是错的，从 XIndex 开始覆盖
+        rf.nextIndex[server] = xIndex
+    }
+}
+
+
+
+

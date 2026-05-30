@@ -25,7 +25,9 @@ type AppendEntriesReply struct {
 	
 	// 2B:
 	Success bool
-	ConflictStart int
+	XTerm   int  // 冲突的 term
+    XIndex  int  // 该 term 第一条 log 的 index
+    XLen    int  // log 长度（用于 prevLogIndex 超出范围的情况）
 
 
 }
@@ -34,11 +36,7 @@ type AppendEntriesReply struct {
 func (rf *Raft) replicator(i int) {
 
 
-	for {
-
-		if _, leads := rf.GetState(); !leads {
-			return 
-		}
+	for !rf.killed() {
 
 		retry := true
 
@@ -55,7 +53,11 @@ func (rf *Raft) replicator(i int) {
 func (rf *Raft) singleAppend(i int) (retry bool) {
 	
 	rf.mu.Lock() // ----------- 锁 --------------
-    prevLogIndex := rf.nextIndex[i] - 1
+	if rf.state != Leader {
+		rf.mu.Unlock()
+		return false
+	}
+	prevLogIndex := rf.nextIndex[i] - 1
     args := &AppendEntriesArgs{
 		Term: rf.currentTerm,
 		LeaderId: rf.me,
@@ -95,9 +97,9 @@ func (rf *Raft) singleAppend(i int) (retry bool) {
 	// "If AppendEntries fails because of log inconsistency: decrement nextIndex and retry"
     // "If successful: update nextIndex and matchIndex for follower"
     if !reply.Success {
-		rf.nextIndex[i] = reply.ConflictStart
+		rf.stepBack(i, reply.XTerm, reply.XIndex, reply.XLen)
 		return true
-    }
+	}
 
 
 	rf.matchIndex[i] = prevLogIndex + len(args.Entries)
@@ -167,9 +169,25 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return 
 	}
 
+	 rf.touched()
+
 	// 2. "Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm"
-    if args.PrevLogIndex >= len(rf.log) ||
-	rf.log[args.PrevLogIndex].Term != args.PrevLogTerm  {
+    if args.PrevLogIndex >= len(rf.log) {
+		reply.XTerm = -1
+		reply.XIndex = -1
+		reply.XLen = rf.logLength()
+		reply.Term = rf.currentTerm
+		reply.Success = false
+		return
+	}
+	if rf.get(args.PrevLogIndex).Term != args.PrevLogTerm {
+		reply.XTerm = rf.get(args.PrevLogIndex).Term
+		xIndex := args.PrevLogIndex
+		for xIndex-1 >= 1 && rf.get(xIndex-1).Term == reply.XTerm {
+			xIndex--
+		}
+		reply.XIndex = xIndex
+		reply.XLen = -1
 		reply.Term = rf.currentTerm
 		reply.Success = false
 		return
@@ -184,7 +202,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	for myIdx < len(rf.log) && yourIdx < len(args.Entries) {
 		if rf.log[myIdx].Term != args.Entries[yourIdx].Term {
-			rf.log = rf.log[ : myIdx] // 连同这个也不要了。
+			rf.log = rf.log[ : myIdx] // 连同这个也不要了。2D需要更改。
 			break
 		} 
 		myIdx++
@@ -193,15 +211,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	
 
 	// 4. "Append any new entries not already in the log"
-	for yourIdx < len(args.Entries) {
-		rf.append(args.Entries[yourIdx])
-		myIdx++
-		yourIdx++
-	}
+	rf.batchAppend(args.Entries[yourIdx:])
+	
 
 	// 5. "If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)"
 	if args.LeaderCommit > rf.commitIndex {
-		rf.commitIndex = min(args.LeaderCommit, len(rf.log) - 1)
+		rf.commitIndex = min(args.LeaderCommit, rf.logLength() - 1)
 
 		if rf.commitIndex > rf.lastApplied {
 			rf.bEffortKick()
@@ -213,7 +228,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	
 
 	
-    rf.touched()
+   
 
 	reply.Term = rf.currentTerm
 	reply.Success = true
@@ -221,4 +236,3 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	
 
 } 
-
