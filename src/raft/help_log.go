@@ -51,7 +51,6 @@ func (rf *Raft) logLength() int {
 func (rf *Raft) append(entry Entry) {
 
 	rf.log = append(rf.log, entry)
-	rf.bEffortKick()
 	rf.persist()
 }
 
