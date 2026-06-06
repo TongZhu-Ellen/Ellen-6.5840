@@ -16,7 +16,10 @@ const (
 
 type GetArgs struct {
 	Key string
-	// You'll have to add definitions here.
+
+	ClientId int64
+    SeqNum   int64
+
 }
 
 type GetReply struct {
@@ -38,6 +41,9 @@ type PutAppendArgs struct {
 	Key   string
 	Value string
 	Op    string // "Put" or "Append"
+
+	ClientId int64
+    SeqNum   int64
 }
 
 type PutAppendReply struct {

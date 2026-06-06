@@ -9,9 +9,12 @@ import (
 )
 
 
+// seqNum倒是不用并发保护毕竟RPC是串行打的... 
+
 type Clerk struct {
 	servers []*labrpc.ClientEnd
-	// You will have to modify this struct.
+	clientId int64  // MakeClerk 时 nrand() 生成，终身不变
+    seqNum   int64  // 从 1 开始，成功后 +1 // actually it's "next avail seqNum"
 }
 
 func nrand() int64 {
@@ -24,7 +27,8 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
-	// You'll have to add code here.
+	ck.clientId = nrand()
+    ck.seqNum = 1
 	return ck
 }
 
@@ -39,12 +43,15 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) string {
+	
 
 	for {
 
 		for i := range ck.servers {
 			args := &GetArgs{
 				Key: key,
+				ClientId: ck.clientId,
+    			SeqNum:   ck.seqNum,
 			}
 			reply := &GetReply{}
 			ok := ck.servers[i].Call("KVServer.Get", args, reply)
@@ -55,11 +62,15 @@ func (ck *Clerk) Get(key string) string {
 				continue
 			}
 
-			if reply.Err == ErrNoKey {
-				return ""
-			}
+			ck.seqNum++ // 好了接下来的情况都是成功的了！
 
-			return reply.Value
+
+			switch reply.Err {
+			case ErrNoKey:
+				return ""
+			case OK:
+				return reply.Value
+			}
 		}
 		
 
@@ -85,6 +96,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 				Key: key,
 				Value: value,
 				Op: op,
+				ClientId: ck.clientId,
+   				SeqNum:   ck.seqNum,
 			}
 			reply := &PutAppendReply{}
 			ok := ck.servers[i].Call("KVServer.PutAppend", args, reply)
@@ -96,6 +109,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			}
 
 			if reply.Err == OK {
+				ck.seqNum++ 
 				return 
 			}
 
@@ -103,12 +117,13 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 			
 		}
-		
 
 		// 都试过了没找到
 		// 事已至此先睡觉
 		time.Sleep(100 * time.Millisecond)
 	}
+
+	
 }
 
 
