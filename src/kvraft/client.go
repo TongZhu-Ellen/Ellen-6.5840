@@ -3,10 +3,9 @@ package kvraft
 import "6.5840/labrpc"
 import "crypto/rand"
 import "math/big"
+import "time"
 
-import (
-	"time"
-)
+
 
 
 // seqNum倒是不用并发保护毕竟RPC是串行打的... 
@@ -15,6 +14,8 @@ type Clerk struct {
 	servers []*labrpc.ClientEnd
 	clientId int64  // MakeClerk 时 nrand() 生成，终身不变
     seqNum   int64  // 从 1 开始，成功后 +1 // actually it's "next avail seqNum"
+
+	leader int
 }
 
 func nrand() int64 {
@@ -43,41 +44,29 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) string {
-	
+    for {
+        args := &GetArgs{
+            Key:      key,
+            ClientId: ck.clientId,
+            SeqNum:   ck.seqNum,
+        }
+        reply := &GetReply{}
+        ok := ck.servers[ck.leader].Call("KVServer.Get", args, reply)
 
-	for {
+        if !ok || reply.Err == ErrWrongLeader {
+            ck.leader = (ck.leader + 1) % len(ck.servers)
+            time.Sleep(10 * time.Millisecond)
+            continue
+        }
 
-		for i := range ck.servers {
-			args := &GetArgs{
-				Key: key,
-				ClientId: ck.clientId,
-    			SeqNum:   ck.seqNum,
-			}
-			reply := &GetReply{}
-			ok := ck.servers[i].Call("KVServer.Get", args, reply)
-
-			// ---------- server处理中 ------------
-
-			if !ok || reply.Err == ErrWrongLeader {
-				continue
-			}
-
-			ck.seqNum++ // 好了接下来的情况都是成功的了！
-
-
-			switch reply.Err {
-			case ErrNoKey:
-				return ""
-			case OK:
-				return reply.Value
-			}
-		}
-		
-
-		// 都试过了没找到
-		// 事已至此先睡觉
-		time.Sleep(100 * time.Millisecond)
-	}
+        ck.seqNum++
+        switch reply.Err {
+        case ErrNoKey:
+            return ""
+        case OK:
+            return reply.Value
+        }
+    }
 }
 
 // shared by Put and Append.
@@ -90,40 +79,27 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	for {
+		args := &PutAppendArgs{
+			Key:      key,
+			Value:    value,
+			Op:       op,
+			ClientId: ck.clientId,
+			SeqNum:   ck.seqNum,
+		}
+		reply := &PutAppendReply{}
+		ok := ck.servers[ck.leader].Call("KVServer.PutAppend", args, reply)
 
-		for i := range ck.servers {
-			args := &PutAppendArgs{
-				Key: key,
-				Value: value,
-				Op: op,
-				ClientId: ck.clientId,
-   				SeqNum:   ck.seqNum,
-			}
-			reply := &PutAppendReply{}
-			ok := ck.servers[i].Call("KVServer.PutAppend", args, reply)
-
-			// ---------- server处理中 ------------
-
-			if !ok || reply.Err == ErrWrongLeader {
-				continue
-			}
-
-			if reply.Err == OK {
-				ck.seqNum++ 
-				return 
-			}
-
-			
-
-			
+		if !ok || reply.Err == ErrWrongLeader {
+			ck.leader = (ck.leader + 1) % len(ck.servers)
+			time.Sleep(10 * time.Millisecond)
+			continue
 		}
 
-		// 都试过了没找到
-		// 事已至此先睡觉
-		time.Sleep(100 * time.Millisecond)
+		if reply.Err == OK {
+			ck.seqNum++
+			return
+		}
 	}
-
-	
 }
 
 
