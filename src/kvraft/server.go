@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 	"fmt"
+	
 )
 
 const Debug = false
@@ -62,17 +63,20 @@ type Op struct {
 
 
 type KVServer struct {
-	mu      sync.Mutex
-	me      int
-	rf      *raft.Raft
+	mu        sync.Mutex
+	me        int
+	applyCh   chan raft.ApplyMsg
+	rf        *raft.Raft
+	persister *raft.Persister
 
-	applyCh  chan raft.ApplyMsg
+	
 	chanMap  map[string]chan struct{} // key == clientId@seqNum
 	lastSeq  map[int64]int64 // clientId → 最后成功执行的 seqNum
 	kvMap    map[string]string 
 
 
 	dead    int32 // set by Kill()
+	lastApplied  int
 	maxraftstate int // snapshot if log grows this big
 
 	
@@ -89,11 +93,18 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.me = me
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
+	kv.persister = persister
+
 	kv.chanMap = make(map[string]chan struct{})
 	kv.lastSeq = make(map[int64]int64)
 	kv.kvMap = make(map[string]string)
 
+	kv.lastApplied = 0
 	kv.maxraftstate = maxraftstate
+
+	if snapshot := persister.ReadSnapshot(); len(snapshot) > 0 {
+		kv.decodeSnapshot(snapshot)
+	}
 
 	go kv.guardApply()
 
@@ -112,11 +123,22 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 func (kv *KVServer) guardApply() {
     for msg := range kv.applyCh {
 		
+		if msg.SnapshotValid { 
+            kv.mu.Lock()
+            kv.decodeSnapshot(msg.Snapshot)
+            kv.lastApplied = msg.SnapshotIndex
+            kv.mu.Unlock()
+            continue
+        }
+
+
         op := msg.Command.(Op)
+		
 		key := helpKey(op.ClientId, op.SeqNum)
 		kv.mu.Lock()
 		if op.SeqNum <= kv.lastSeq[op.ClientId] {
-			kv.helpNotice(key)
+			kv.lastApplied = msg.CommandIndex
+			kv.notifyAndUnlock(key)
 			continue
 		}
 
@@ -128,16 +150,24 @@ func (kv *KVServer) guardApply() {
 			kv.kvMap[op.Key] += op.Value
 	    }
 
-		kv.helpNotice(key)
+		kv.lastApplied = msg.CommandIndex
+
+		kv.notifyAndUnlock(key)
 		
+		kv.mu.Lock()
+		if kv.maxraftstate != -1 && kv.persister.RaftStateSize() > kv.maxraftstate {
+			go kv.rf.Snapshot(kv.lastApplied, kv.encodeSnapshot())
+		}
+		kv.mu.Unlock()
+
 		
 
 		
 	}
 }
 
-
-func (kv *KVServer) helpNotice(key string) {
+// 持锁进入在这个函数里面会放锁的。
+func (kv *KVServer) notifyAndUnlock(key string) {
 	
 	waitChan, ok := kv.chanMap[key]
 	kv.mu.Unlock()
@@ -147,6 +177,8 @@ func (kv *KVServer) helpNotice(key string) {
         default:
         }
     }
+
+
 }
 
 
@@ -203,8 +235,8 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
         Key: args.Key,
 		Value: args.Value,
 
-		ClientId: args.ClientId, // 漏了
-    	SeqNum:   args.SeqNum,   // 漏了
+		ClientId: args.ClientId, 
+    	SeqNum:   args.SeqNum,   
     }
 	key := helpKey(args.ClientId, args.SeqNum)
 
