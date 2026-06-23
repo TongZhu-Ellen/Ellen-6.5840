@@ -4,7 +4,6 @@ import "time"
 
 
 
-
 type AppendEntriesArgs struct {
 
 	Term int // leader's term
@@ -37,32 +36,34 @@ type AppendEntriesReply struct {
 func (rf *Raft) replicator(i int) {
 
 
-	for {
-		if _, leads := rf.GetState(); !leads {
-			return // 这里包含了killed的检查了！
+	for !rf.killed() {
+
+		retry := true
+
+		for retry {
+		    retry = rf.singleAppend(i)
 		}
 
-        select {
-        case <-rf.replicateCh[i]:
-        case <-time.After(HEATBEAT_INTERVAL):
-        }
-        rf.singleAppend(i)
-    }
+		time.Sleep(HEATBEAT_INTERVAL)
+	}
 	
 
 }
 
-func (rf *Raft) singleAppend(i int) {
+func (rf *Raft) singleAppend(i int) (retry bool) {
 	
 	rf.mu.Lock() // ----------- 锁 --------------
-	
+	if rf.state != Leader {
+		rf.mu.Unlock()
+		return false
+	}
 	prevLogIndex := rf.nextIndex[i] - 1
 
 	// 2D:
 	if prevLogIndex < rf.snapIndex {
 		rf.helpInstall(i) 
 		rf.mu.Unlock()
-		return
+		return false
 	}
 	
     args := &AppendEntriesArgs{
@@ -77,12 +78,13 @@ func (rf *Raft) singleAppend(i int) {
     reply := &AppendEntriesReply{}
     rf.mu.Unlock() // ----------- 锁 --------------
 
-   
+    ok := rf.sendAppendEntries(i, args, reply) 
 
     // ----------- Server 处理中！ --------------
 
-	if !rf.sendAppendEntries(i, args, reply) { // 这是没发出去...  
-		return
+	if !ok { // 这是没发出去...  
+		time.Sleep(10 * time.Millisecond)
+		return true
 	}
 
 
@@ -92,12 +94,12 @@ func (rf *Raft) singleAppend(i int) {
     // 更改自身term的逻辑永远先行！
     if reply.Term > rf.currentTerm { 
 		rf.newGen(reply.Term)
-		return
+		return false
 	}
 
 	// 朝代已然改变！
     if rf.currentTerm != args.Term || rf.state != Leader {
-		return
+		return false
 	}
 
 
@@ -105,14 +107,14 @@ func (rf *Raft) singleAppend(i int) {
     // "If successful: update nextIndex and matchIndex for follower"
     if !reply.Success {
 		rf.stepBack(i, reply.XTerm, reply.XIndex, reply.XLen)
-		return 
+		return true
 	}
 
 
 	rf.matchIndex[i] = prevLogIndex + len(args.Entries)
 	rf.nextIndex[i]  = rf.matchIndex[i] + 1
 	rf.updateCommitIndex()
-	
+	return false
 }
 
  

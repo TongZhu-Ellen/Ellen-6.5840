@@ -34,19 +34,16 @@ func (rf *Raft) becomeLeader() {
 
 	rf.nextIndex = make([]int, len(rf.peers))  
 	rf.matchIndex = make([]int, len(rf.peers)) 
-	rf.replicateCh = make([]chan struct{}, len(rf.peers))
 
 	for i := range rf.peers {
 		if i == rf.me { 
 			rf.nextIndex[i] = -1
 			rf.matchIndex[i] = -1
-			rf.replicateCh[i] = nil
 			continue
 		} 
 
 		rf.nextIndex[i] = lastLogIndex + 1 // "initialized to leader's lastLogIndex + 1"
 		rf.matchIndex[i] = 0 // "initialized to 0"
-		rf.replicateCh[i] = make(chan struct{}, 1)
 		go rf.replicator(i)
 	}
 	

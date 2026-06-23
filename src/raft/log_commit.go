@@ -5,10 +5,11 @@ package raft
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 
-	rf.mu.Lock() 
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 
 	if rf.state != Leader {
-		rf.mu.Unlock()
 		return -1, -1, false
 	}
 
@@ -23,20 +24,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := rf.logLength() - 1 // index to be inserted to! 
 	term := rf.currentTerm
 	isLeader := rf.state == Leader
-
-	rf.mu.Unlock()
-
-
-
-	for i := range rf.peers {
-		if i == rf.me {
-			continue
-		}
-		select {
-		case rf.replicateCh[i] <- struct{}{}:
-		default:
-		}
-	}
 
 	return index, term, isLeader
 }

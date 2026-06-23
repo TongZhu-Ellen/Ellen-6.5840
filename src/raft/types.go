@@ -79,7 +79,6 @@ type Raft struct {
 	// for leader only:
 	nextIndex []int
 	matchIndex []int
-	replicateCh []chan struct{}  // 每个 peer 一个，用于触发 replicator
 
 	// 2D:
 	snapIndex int  // 最后一个被 snapshot 的 index

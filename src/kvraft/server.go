@@ -137,7 +137,7 @@ func (kv *KVServer) guardApply() {
 		key := helpKey(op.ClientId, op.SeqNum)
 		kv.mu.Lock()
 		if op.SeqNum <= kv.lastSeq[op.ClientId] {
-			kv.lastApplied = msg.CommandIndex // ! 我们不apply，但是我们依然推进了log！
+			kv.lastApplied = msg.CommandIndex
 			kv.notifyAndUnlock(key)
 			continue
 		}
@@ -151,11 +151,12 @@ func (kv *KVServer) guardApply() {
 	    }
 
 		kv.lastApplied = msg.CommandIndex
+
 		kv.notifyAndUnlock(key)
 		
 		kv.mu.Lock()
 		if kv.maxraftstate != -1 && kv.persister.RaftStateSize() > kv.maxraftstate {
-			go kv.rf.Snapshot(kv.lastApplied, kv.encodeSnapshot()) // 这里其实snapIdx就是lastApplied... anyhow... 
+			go kv.rf.Snapshot(kv.lastApplied, kv.encodeSnapshot())
 		}
 		kv.mu.Unlock()
 

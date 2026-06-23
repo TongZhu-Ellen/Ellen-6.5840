@@ -12,7 +12,7 @@ func (kv *KVServer) encodeSnapshot() []byte {
     e := labgob.NewEncoder(w)
     e.Encode(kv.kvMap)
     e.Encode(kv.lastSeq)
-   
+    e.Encode(kv.lastApplied)   // ⭐ 新增
     return w.Bytes()
 }
 
@@ -27,14 +27,15 @@ func (kv *KVServer) decodeSnapshot(data []byte) {
 
     var kvMap map[string]string
     var lastSeq map[int64]int64
-   
+    var lastApplied int        // ⭐ 新增
 
     if d.Decode(&kvMap) != nil ||
-       d.Decode(&lastSeq) != nil {
+       d.Decode(&lastSeq) != nil ||
+       d.Decode(&lastApplied) != nil {
         return
     }
 
     kv.kvMap = kvMap
     kv.lastSeq = lastSeq
-    
+    kv.lastApplied = lastApplied   // ⭐ 新增
 }
