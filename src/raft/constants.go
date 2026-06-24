@@ -5,8 +5,8 @@ import "time"
 
 
 const (
-	SELECTION_TIMEOUT = 300 * time.Millisecond
-	HEATBEAT_INTERVAL =  50 * time.Millisecond
+	SELECTION_TIMEOUT = 500 * time.Millisecond
+	HEATBEAT_INTERVAL =  100 * time.Millisecond
 	
 )
 
